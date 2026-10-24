@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DoceLandia</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: #0b0710; overflow: hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  /* o palco mantem 16:9 e nunca distorce a arte */
+  #palco {
+    position: absolute; inset: 0; margin: auto;
+    width: min(100vw, calc(100vh * 16 / 9));
+    height: min(100vh, calc(100vw * 9 / 16));
+    background: #000;
+  }
+  #cena, #cenaSai {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; object-fit: contain;
+    user-select: none; -webkit-user-drag: none;
+  }
+  /* a cena que sai fica por cima e some; a nova aparece por baixo */
+  #cenaSai {
+    pointer-events: none; opacity: 0; visibility: hidden;
+    will-change: transform, opacity;
+  }
+  #cenaSai.anima { visibility: visible; }
+
+  /* --- passagem suave: esmaece com um deslize minimo --- */
+  #cenaSai.frente { animation: saiFrente var(--tr) ease-in-out forwards; }
+  #cenaSai.tras   { animation: saiTras   var(--tr) ease-in-out forwards; }
+  #cena.entra.frente { animation: entraFrente var(--tr) ease-in-out; }
+  #cena.entra.tras   { animation: entraTras   var(--tr) ease-in-out; }
+
+  :root { --tr: 360ms; }
+
+  /* a leve ampliacao evita que a borda preta apareca durante o deslize */
+  @keyframes saiFrente {
+    from { opacity: 1; transform: translateX(0) scale(1); }
+    to   { opacity: 0; transform: translateX(-1.8%) scale(1.05); }
+  }
+  @keyframes saiTras {
+    from { opacity: 1; transform: translateX(0) scale(1); }
+    to   { opacity: 0; transform: translateX(1.8%) scale(1.05); }
+  }
+  @keyframes entraFrente {
+    from { transform: translateX(1.8%) scale(1.05); }
+    to   { transform: translateX(0) scale(1); }
+  }
+  @keyframes entraTras {
+    from { transform: translateX(-1.8%) scale(1.05); }
+    to   { transform: translateX(0) scale(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :root { --tr: 180ms; }
+    #cenaSai.frente, #cenaSai.tras { animation: soApaga var(--tr) ease forwards; }
+    #cena.entra.frente, #cena.entra.tras { animation: none; }
+    @keyframes soApaga { to { opacity: 0; } }
+  }
+
+  /* areas clicaveis invisiveis por cima dos botoes desenhados na arte */
+  .hot {
+    position: absolute; cursor: pointer; border-radius: 999px;
+    background: transparent; border: 2px solid transparent;
+    padding: 0; margin: 0; appearance: none; -webkit-appearance: none;
+    font: inherit; color: inherit;
+    transition: background .15s, border-color .15s, box-shadow .15s;
+  }
+  .hot:hover, .hot:focus-visible {
+    background: rgba(255,255,255,.14);
+    border-color: rgba(255,255,255,.75);
+    box-shadow: 0 0 18px rgba(255,170,220,.65);
+    outline: none;
+  }
+  .hot:active { background: rgba(255,255,255,.26); }
+  body.dica .hot {
+    background: rgba(255,80,170,.28);
+    border-color: rgba(255,255,255,.9);
+  }
+
+  /* botao VOLTAR: canto inferior esquerdo, discreto, some na primeira cena */
+  #voltarCena {
+    --u: min(100vh, calc(100vw * 9 / 16));
+    position: absolute;
+    left: 1.5%;
+    top: 91%;
+    height: 6.5%;
+    padding: 0 calc(var(--u) * .022);
+    display: inline-flex; align-items: center; gap: .45em;
+    font: 600 calc(var(--u) * .026)/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    letter-spacing: .06em;
+    color: #ffeaf6;
+    background: rgba(26, 10, 24, .55);
+    border: calc(var(--u) * .0022) solid rgba(255, 220, 240, .55);
+    border-radius: 999px;
+    cursor: pointer; opacity: .45;
+    backdrop-filter: blur(3px);
+    transition: opacity .18s, background .18s, box-shadow .18s, transform .12s;
+  }
+  #voltarCena:hover, #voltarCena:focus-visible {
+    opacity: 1; outline: none;
+    background: rgba(40, 14, 36, .82);
+    box-shadow: 0 0 calc(var(--u) * .022) rgba(255, 150, 210, .55);
+  }
+  #voltarCena:active { transform: translateY(1px); }
+  #voltarCena[hidden] { display: none; }
+
+  /* barra discreta: nao cobre a arte, some sozinha */
+  #hud {
+    position: absolute; left: 0; right: 0; top: 0; padding: 10px 14px;
+    display: flex; gap: 10px; align-items: center;
+    background: linear-gradient(rgba(0,0,0,.55), transparent);
+    opacity: 0; transition: opacity .25s; pointer-events: none;
+    font-size: 13px; color: #ffd9ef;
+  }
+  #hud.ver { opacity: 1; }
+  #hud > * { pointer-events: none; }
+  #hud.ver > * { pointer-events: auto; }
+  #hud button {
+    font: inherit; color: #ffe9f6; background: rgba(255,255,255,.1);
+    border: 1px solid rgba(255,255,255,.3); border-radius: 999px;
+    padding: 5px 12px; cursor: pointer;
+  }
+  #hud button:hover { background: rgba(255,255,255,.22); }
+  #contador { margin-left: auto; letter-spacing: .5px; opacity: .85; }
+
+  /* ---- barra de carregamento da cena 068 ---- */
+  #barraCarga {
+    --u: min(100vh, calc(100vw * 9 / 16));
+    --p: calc(var(--u) * .011);              /* largura da listra */
+    position: absolute; overflow: hidden; pointer-events: none;
+    border-radius: calc(var(--u) * .010);
+    /* trilho vazio, na mesma cor do desenho */
+    background: linear-gradient(180deg, #3f0a00 0%, #6b2204 18%, #7c2a07 50%,
+                                        #6a2204 82%, #2e0000 100%);
+    box-shadow: inset 0 calc(var(--u) * .004) calc(var(--u) * .006) rgba(0,0,0,.55);
+  }
+  #enchendo {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.5), rgba(255,255,255,0) 46%,
+                              rgba(120,0,50,.18)),
+      repeating-linear-gradient(115deg,
+        #ff9cca 0 var(--p), #ff4e9d var(--p) calc(var(--p) * 2));
+    background-size: auto, calc(var(--p) * 2.83) 100%;
+    clip-path: inset(0 100% 0 0);
+    will-change: clip-path;
+    animation: listras 1.1s linear infinite;
+  }
+  #enchendo.correndo {
+    transition: clip-path var(--dur) cubic-bezier(.35,.02,.25,1);
+    clip-path: inset(0 0 0 0);
+  }
+  #enchendo.cheio { clip-path: inset(0 0 0 0); animation-play-state: paused; }
+  @keyframes listras { to { background-position: 0 0, calc(var(--p) * -2.83) 0; } }
+
+  /* brilho que acompanha a ponta do preenchimento */
+  #pontaLuz {
+    position: absolute; top: -12%; bottom: -12%; width: calc(var(--u) * .018);
+    border-radius: 50%; pointer-events: none;
+    background: radial-gradient(closest-side, rgba(255,255,255,.95), rgba(255,210,235,0));
+    opacity: 0; transition: opacity .3s;
+  }
+
+  /* veu que mostra o botao ainda bloqueado */
+  #veuBotao {
+    position: absolute; border-radius: 999px; pointer-events: none;
+    background: rgba(18, 5, 14, .52);
+    backdrop-filter: grayscale(.8) brightness(.78);
+    -webkit-backdrop-filter: grayscale(.8) brightness(.78);
+    transition: opacity .55s ease;
+  }
+  .hot.travado { pointer-events: none; }
+  .hot.liberado { animation: pulsar 1.7s ease-in-out infinite; }
+  @keyframes pulsar {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,150,210, 0); }
+    50%      { box-shadow: 0 0 calc(min(100vh, 100vw * 9 / 16) * .035)
+                           calc(min(100vh, 100vw * 9 / 16) * .006) rgba(255,160,215,.8); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #enchendo { animation: none; }
+    .hot.liberado { animation: none; }
+  }
+
+  /* ---- portao de entrada ---- */
+  #portao {
+    position: fixed; inset: 0; z-index: 99999;
+    display: grid; place-items: center; padding: 24px;
+    background:
+      radial-gradient(circle at 30% 20%, #4a1038 0%, transparent 55%),
+      radial-gradient(circle at 75% 80%, #5b1442 0%, transparent 55%),
+      #1b0714;
+    color: #ffe9f6; text-align: center;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    transition: opacity .5s ease;
+  }
+  #portao.saindo { opacity: 0; pointer-events: none; }
+  #portao form { width: min(420px, 100%); }
+  #portao h1 {
+    margin: 0 0 .25em; font-size: clamp(30px, 6vw, 46px); letter-spacing: .02em;
+    background: linear-gradient(#fff0f8, #ff9ad2);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  #portao p { margin: 0 0 1.6em; opacity: .8; font-size: 15px; line-height: 1.6; }
+  #campoSenha {
+    width: 100%; box-sizing: border-box; text-align: center;
+    font: 500 18px/1 system-ui, sans-serif; letter-spacing: .12em;
+    color: #fff; background: rgba(255,255,255,.08);
+    border: 2px solid rgba(255,190,225,.45); border-radius: 999px;
+    padding: 14px 18px; outline: none;
+    transition: border-color .2s, background .2s;
+  }
+  #campoSenha:focus { border-color: #ff8ec9; background: rgba(255,255,255,.14); }
+  #campoSenha::placeholder { color: rgba(255,230,245,.4); letter-spacing: .08em; }
+  #portao button {
+    margin-top: 14px; width: 100%; cursor: pointer;
+    font: 700 16px/1 system-ui, sans-serif; letter-spacing: .08em;
+    color: #4a0f33; background: linear-gradient(#ffd3ea, #ff8ec9);
+    border: none; border-radius: 999px; padding: 15px;
+    transition: filter .18s, transform .1s;
+  }
+  #portao button:hover { filter: brightness(1.08); }
+  #portao button:active { transform: translateY(1px); }
+  #portao button[disabled] { filter: grayscale(.6) brightness(.8); cursor: wait; }
+  #erroSenha { min-height: 1.4em; margin: 14px 0 0; font-size: 14px; color: #ff9ab8; }
+  #portao.tremendo form { animation: tremer .4s; }
+  @keyframes tremer {
+    0%,100% { transform: translateX(0); }
+    20% { transform: translateX(-9px); } 40% { transform: translateX(8px); }
+    60% { transform: translateX(-5px); } 80% { transform: translateX(4px); }
+  }
+
+  /* ---- menu lateral de cenas ---- */
+  /* painel e aba deslizam juntos: a aba e a alca do painel */
+  #painelLateral {
+    --u: min(100vh, calc(100vw * 9 / 16));
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 27%; min-width: calc(var(--u) * .34);
+    z-index: 7; pointer-events: none;
+    transform: translateX(-100%);
+    transition: transform .34s cubic-bezier(.4, 0, .2, 1);
+  }
+  #painelLateral.aberto { transform: translateX(0); }
+
+  #menuCenas {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    background: rgba(18, 7, 16, .93);
+    border-right: calc(var(--u) * .002) solid rgba(255,200,235,.3);
+    backdrop-filter: blur(8px);
+    color: #ffe9f6; font-size: calc(var(--u) * .024);
+    pointer-events: none;
+  }
+  #painelLateral.aberto #menuCenas { pointer-events: auto; }
+
+  /* alca grudada na borda direita do painel */
+  #abaMenu {
+    position: absolute; left: 100%; top: 50%; transform: translateY(-50%);
+    width: calc(var(--u) * .052); height: calc(var(--u) * .34);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: calc(var(--u) * .018);
+    padding: 0; cursor: pointer; pointer-events: auto;
+    color: #ffe9f6; background: rgba(26,10,24,.62);
+    border: calc(var(--u) * .002) solid rgba(255,220,240,.45);
+    border-left: none; border-radius: 0 calc(var(--u) * .022) calc(var(--u) * .022) 0;
+    opacity: .4; backdrop-filter: blur(4px);
+    transition: opacity .18s, background .18s, box-shadow .18s;
+  }
+  #abaMenu:hover, #abaMenu:focus-visible {
+    opacity: 1; outline: none; background: rgba(44,16,40,.88);
+    box-shadow: 0 0 calc(var(--u) * .022) rgba(255,150,210,.55);
+  }
+  #setaAba {
+    font: 700 calc(var(--u) * .03)/1 system-ui, sans-serif;
+    transition: transform .34s cubic-bezier(.4, 0, .2, 1);
+  }
+  #painelLateral.aberto #setaAba { transform: rotate(180deg); }
+  #rotuloAba {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font: 600 calc(var(--u) * .019)/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    letter-spacing: .14em; white-space: nowrap;
+  }
+
+  #menuCenas header {
+    padding: calc(var(--u) * .032) calc(var(--u) * .028) calc(var(--u) * .018);
+    border-bottom: 1px solid rgba(255,200,235,.18);
+    font-weight: 700; letter-spacing: .04em;
+  }
+
+  #listaCenas {
+    flex: 1; overflow-y: auto; overscroll-behavior: contain;
+    padding: calc(var(--u) * .016) calc(var(--u) * .024) calc(var(--u) * .04);
+    scrollbar-width: thin; scrollbar-color: rgba(255,170,215,.5) transparent;
+  }
+  #listaCenas::-webkit-scrollbar { width: calc(var(--u) * .01); }
+  #listaCenas::-webkit-scrollbar-thumb {
+    background: rgba(255,170,215,.45); border-radius: 999px;
+  }
+  #listaCenas h4 {
+    margin: calc(var(--u) * .022) 0 calc(var(--u) * .01);
+    font-size: .76em; font-weight: 600; letter-spacing: .09em;
+    text-transform: uppercase; color: #ffb9e0; opacity: .85;
+  }
+  #listaCenas h4:first-child { margin-top: 0; }
+  .grupoCenas {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: calc(var(--u) * .008);
+  }
+  .irCena {
+    font: inherit; font-size: .84em; font-variant-numeric: tabular-nums;
+    color: #ffe9f6; background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.14); border-radius: calc(var(--u) * .009);
+    padding: calc(var(--u) * .009) 0; cursor: pointer;
+    transition: background .14s, border-color .14s, color .14s;
+  }
+  .irCena:hover, .irCena:focus-visible {
+    background: rgba(255,120,190,.35); border-color: rgba(255,220,240,.8);
+    outline: none;
+  }
+  .irCena.atual {
+    background: rgba(255,90,175,.75); border-color: #fff; font-weight: 700;
+  }
+
+  #veuMenu {
+    position: absolute; inset: 0; z-index: 6;
+    background: rgba(0,0,0,.35); opacity: 0; pointer-events: none;
+    transition: opacity .3s;
+  }
+  #veuMenu.aberto { opacity: 1; pointer-events: auto; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #painelLateral, #setaAba { transition: none; }
+  }
+
+  /* ---- botao de som ---- */
+  #som {
+    --u: min(100vh, calc(100vw * 9 / 16));
+    position: absolute; top: 2.2%; right: 1.4%;
+    width: calc(var(--u) * .062); height: calc(var(--u) * .062);
+    display: grid; place-items: center;
+    padding: 0; border-radius: 50%; cursor: pointer;
+    color: #ffe9f6; background: rgba(26,10,24,.5);
+    border: calc(var(--u) * .002) solid rgba(255,220,240,.5);
+    opacity: .38; backdrop-filter: blur(3px);
+    transition: opacity .18s, background .18s, box-shadow .18s;
+    z-index: 5;
+  }
+  #som:hover, #som:focus-visible {
+    opacity: 1; outline: none; background: rgba(40,14,36,.8);
+    box-shadow: 0 0 calc(var(--u) * .02) rgba(255,150,210,.55);
+  }
+  #som svg { width: 58%; height: 58%; fill: currentColor; }
+  #som .corte { display: none; }
+  #som.mudo { opacity: .3; }
+  #som.mudo .onda { display: none; }
+  #som.mudo .corte { display: block; }
+
+  /* ---- brilhos ao clicar ---- */
+  #brilhos {
+    position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+    overflow: hidden; contain: strict;
+  }
+  .faisca {
+    position: absolute; left: 0; top: 0;
+    width: var(--t); height: var(--t);
+    margin: calc(var(--t) / -2) 0 0 calc(var(--t) / -2);
+    background: var(--cor);
+    clip-path: polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%,
+                       50% 100%, 39% 61%, 0% 50%, 39% 39%);
+    opacity: 0; will-change: transform, opacity;
+    animation: subir var(--dur) cubic-bezier(.22,.7,.32,1) forwards;
+  }
+  .faisca.bola {
+    clip-path: none; border-radius: 50%;
+    box-shadow: 0 0 calc(var(--t) * .7) var(--cor);
+  }
+  @keyframes subir {
+    0%   { opacity: 0; transform: translate(var(--x), var(--y)) scale(.2) rotate(0deg); }
+    18%  { opacity: 1; transform: translate(calc(var(--x) + var(--dx) * .25),
+                                            calc(var(--y) + var(--dy) * .25))
+                                  scale(1) rotate(calc(var(--giro) * .25)); }
+    100% { opacity: 0; transform: translate(calc(var(--x) + var(--dx)),
+                                            calc(var(--y) + var(--dy)))
+                                  scale(.25) rotate(var(--giro)); }
+  }
+  @media (prefers-reduced-motion: reduce) { .faisca { display: none; } }
+
+  #ajuda {
+    position: absolute; inset: 0; display: none; place-items: center;
+    background: rgba(8,4,12,.88); color: #ffe9f6; text-align: center;
+    padding: 24px; line-height: 1.7; font-size: 15px;
+  }
+  #ajuda.ver { display: grid; }
+  #ajuda kbd {
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.3);
+    border-radius: 6px; padding: 1px 7px; font-family: inherit;
+  }
+</style>
+</head>
+<body>
+<div id="palco">
+  <img id="cena" alt="">
+  <img id="cenaSai" alt="" aria-hidden="true">
+  <button id="voltarCena" title="Cena anterior">&#8592; VOLTAR</button>
+  <div id="veuMenu"></div>
+  <div id="painelLateral">
+    <nav id="menuCenas" aria-label="Ir para uma cena">
+      <header>IR PARA A CENA</header>
+      <div id="listaCenas"></div>
+    </nav>
+    <button id="abaMenu" type="button" aria-expanded="false"
+            aria-controls="menuCenas" title="Ir para uma cena (tecla L)">
+      <span id="setaAba" aria-hidden="true">&rsaquo;</span>
+      <span id="rotuloAba">IR PARA UMA CENA</span>
+    </button>
+  </div>
+  <button id="som" title="Ligar ou desligar o som (tecla M)" aria-label="Som">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 9v6h4l5 4V5L8 9H4z"/>
+      <g class="onda">
+        <path d="M16.2 8.4a1 1 0 0 1 1.4.1 5.3 5.3 0 0 1 0 7 1 1 0 1 1-1.5-1.3 3.3 3.3 0 0 0 0-4.4 1 1 0 0 1 .1-1.4z"/>
+        <path d="M18.8 5.6a1 1 0 0 1 1.4 0 9 9 0 0 1 0 12.8 1 1 0 1 1-1.4-1.4 7 7 0 0 0 0-10 1 1 0 0 1 0-1.4z"/>
+      </g>
+      <path class="corte" d="M16.5 9.5a1 1 0 0 1 1.4 0l1.6 1.6 1.6-1.6a1 1 0 1 1 1.4 1.4L20.9 12.5l1.6 1.6a1 1 0 0 1-1.4 1.4l-1.6-1.6-1.6 1.6a1 1 0 0 1-1.4-1.4l1.6-1.6-1.6-1.6a1 1 0 0 1 0-1.4z"/>
+    </svg>
+  </button>
+  <div id="hud">
+    <button id="reiniciar" title="Comecar do inicio">Reiniciar</button>
+    <button id="btAjuda" title="Ajuda">?</button>
+    <span id="contador"></span>
+  </div>
+  <div id="ajuda">
+    <div>
+      <p><strong>DoceLandia</strong> &mdash; historia interativa</p>
+      <p>Clique nos botoes desenhados na propria cena para avancar.</p>
+      <p><kbd>&rarr;</kbd> <kbd>Espaco</kbd> avanca &nbsp;&middot;&nbsp;
+         <kbd>&larr;</kbd> volta uma cena &nbsp;&middot;&nbsp;
+         <kbd>H</kbd> destaca os botoes &nbsp;&middot;&nbsp;
+         <kbd>M</kbd> liga/desliga o som &nbsp;&middot;&nbsp;
+         <kbd>L</kbd> lista de cenas &nbsp;&middot;&nbsp;
+         <kbd>Esc</kbd> fecha</p>
+      <p style="opacity:.7">O progresso fica salvo neste navegador.</p>
+    </div>
+  </div>
+</div>
+<div id="brilhos" aria-hidden="true"></div>
+<div id="portao">
+  <form id="formSenha" autocomplete="off">
+    <h1>DoceLandia</h1>
+    <p>Esta historia foi feita so para voce.<br>Digite a senha para entrar.</p>
+    <input id="campoSenha" type="password" placeholder="senha" autocomplete="current-password"
+           autocapitalize="off" autocorrect="off" spellcheck="false" required>
+    <button type="submit" id="btEntrar">ABRIR A HISTORIA</button>
+    <p id="erroSenha" role="status" aria-live="polite"></p>
+  </form>
+</div>
+
+
+<script>
+/* ===================== COFRE =====================
+   As cenas ficam no servidor como blocos criptografados (AES-256-GCM).
+   A chave nasce da senha digitada, dentro do navegador, e nunca e enviada
+   a lugar nenhum. Sem a senha os arquivos sao bytes sem sentido.
+   ================================================= */
+const COFRE_DADOS = {"pasta": "cenas", "tipo": "image/webp", "sal": "HAaRclfH4Op3nGr5l46gnQ==", "voltas": 310000, "marca": "docelandia-ok", "prova": "JubJv1oEwlMof98lmFGz7aFSXZBy380ksQZVK5mJzREZ98eUvzQMrdI="};
+
+const Cofre = (function () {
+  let chaveAES = null;
+  const cache = new Map();                 // numero da cena -> blob URL
+  const LIMITE = 14;                       // ~7 MB decifrados em memoria
+
+  const deB64 = b => Uint8Array.from(atob(b), c => c.charCodeAt(0));
+
+  async function derivar(senha) {
+    const base = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(senha), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt: deB64(COFRE_DADOS.sal),
+        iterations: COFRE_DADOS.voltas, hash: "SHA-256" },
+      base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  }
+
+  async function decifrar(bytes, k) {
+    const iv = bytes.slice(0, 12);
+    const corpo = bytes.slice(12);
+    return crypto.subtle.decrypt({ name: "AES-GCM", iv }, k, corpo);
+  }
+
+  return {
+    get aberto() { return chaveAES !== null; },
+
+    /* devolve true se a senha abrir o bloco de verificacao */
+    async abrir(senha) {
+      let k;
+      try { k = await derivar(senha); } catch (e) { return false; }
+      try {
+        const claro = await decifrar(deB64(COFRE_DADOS.prova), k);
+        if (new TextDecoder().decode(claro) !== COFRE_DADOS.marca) return false;
+      } catch (e) { return false; }        // senha errada: o GCM rejeita
+      chaveAES = k;
+      return true;
+    },
+
+    /* baixa, decifra e devolve uma URL utilizavel pela tag <img> */
+    async url(n) {
+      if (cache.has(n)) return cache.get(n);
+      if (!chaveAES) throw new Error("cofre fechado");
+      const r = await fetch(COFRE_DADOS.pasta + "/" + String(n).padStart(3, "0") + ".enc");
+      if (!r.ok) throw new Error("cena " + n + " nao encontrada");
+      const claro = await decifrar(new Uint8Array(await r.arrayBuffer()), chaveAES);
+      const url = URL.createObjectURL(new Blob([claro], { type: COFRE_DADOS.tipo }));
+      cache.set(n, url);
+      while (cache.size > LIMITE) {        // libera as cenas mais antigas
+        const velha = cache.keys().next().value;
+        URL.revokeObjectURL(cache.get(velha));
+        cache.delete(velha);
+      }
+      return url;
+    }
+  };
+})();
+
+/* ===================== AUDIO =====================
+   Tudo sintetizado na hora pela Web Audio API: nenhum arquivo,
+   nenhum download, funciona sem internet e sem questao de direitos.
+   ================================================= */
+const Som = (function () {
+  let ctx = null, mestre = null, gMus = null, gSfx = null, eco = null;
+  let mudo = false, ligado = false;
+  let temaAtual = null, vozTema = null, relogio = null, passoAtual = 0, proxTempo = 0;
+
+  const CHAVE_MUDO = "docelandia.mudo";
+  const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+
+  /* ---- trilhas: cada passo e uma colcheia ---- */
+  const TEMAS = {
+    // DoceLandia: cantiga de ninar em Fa maior. Lenta, esparsa e bem baixinha,
+    // feita para ficar por tras da leitura sem puxar a atencao.
+    doce: {
+      bpm: 60, cor: "suave", vol: 0.34,
+      arp: [65,null,69,null, 72,null,69,null,  62,null,65,null, 69,null,65,null,
+            58,null,62,null, 65,null,62,null,  60,null,64,null, 67,null,64,null],
+      mel: [77,null,null,null, null,null,null,null,  74,null,null,null, null,null,77,null,
+            72,null,null,null, null,null,null,null,  69,null,71,null, 72,null,null,null],
+      baixo: [41,null,null,null,null,null,null,null, 38,null,null,null,null,null,null,null,
+              46,null,null,null,null,null,null,null, 48,null,null,null,null,null,null,null]
+    },
+    // Floresta de Algodao-Doce: Sol maior, passo saltitante e leve.
+    // Tranquila, mas com um balanco divertido para o passeio pelo bosque.
+    alegre: {
+      bpm: 84, cor: "brinca", vol: 0.38,
+      arp: [67,null,71,74, null,74,71,null,  64,null,67,71, null,71,67,null,
+            60,null,64,67, null,67,64,null,  62,null,66,69, null,69,66,null],
+      mel: [79,null,null,null, 83,null,null,null,  81,null,null,null, 79,null,null,null,
+            76,null,null,null, 79,null,null,null,  78,null,null,null, 74,null,null,null],
+      baixo: [43,null,null,null,null,null,null,null, 40,null,null,null,null,null,null,null,
+              36,null,null,null,null,null,null,null, 38,null,null,null,null,null,null,null]
+    },
+    // Volta do cafe e a ponte refeita: Re maior, corrido e animado,
+    // mas com notas curtas e volume baixo para nao ficar pesado.
+    festa: {
+      bpm: 112, cor: "festa", vol: 0.36,
+      arp: [62,66,69,74, 69,66,69,66,  57,61,64,69, 64,61,64,61,
+            59,62,66,71, 66,62,66,62,  55,59,62,67, 62,59,62,66],
+      mel: [81,null,null,78, null,null,74,null,  76,null,null,81, null,null,78,null,
+            83,null,null,78, null,null,74,null,  79,null,null,83, null,null,86,null],
+      baixo: [38,null,null,null,null,null,null,null, 45,null,null,null,null,null,null,null,
+              47,null,null,null,null,null,null,null, 43,null,null,null,null,null,null,null]
+    },
+    // Mistero: La menor, curioso, cordas pinicadas
+    misterio: {
+      bpm: 96, cor: "pizz", vol: 0.42,
+      arp: [57,60,64,60, 67,64,60,64,  53,57,60,57, 65,60,57,60,
+            50,53,57,53, 62,57,53,57,  52,56,59,56, 64,59,56,52],
+      mel: [null,null,72,null, null,null,71,null,  null,null,69,null, null,null,65,null,
+            null,null,69,null, null,null,72,null, null,null,71,null, null,null,null,null],
+      baixo: [33,null,null,null,null,null,null,null, 29,null,null,null,null,null,null,null,
+              26,null,null,null,null,null,null,null, 28,null,null,null,null,null,null,null]
+    },
+    // Parque abandonado, espelhos e a travessia: Mi menor sombrio.
+    // Assustador pelo suspense, nao pela tristeza: tem pulso e um sino agudo.
+    sombrio: {
+      bpm: 76, cor: "sombra", corMel: "caixinha", vol: 0.40,
+      arp: [52,55,59,55, 52,55,59,62,  48,52,55,52, 48,55,52,48,
+            45,48,52,48, 45,52,48,45,  47,51,54,51, 47,54,51,47],
+      mel: [null,null,null,null, 79,null,null,null,  null,null,null,null, 76,null,null,null,
+            null,null,null,null, 72,null,null,null,  null,null,null,null, 71,null,null,null],
+      baixo: [40,null,null,null,null,null,null,null, 36,null,null,null,null,null,null,null,
+              33,null,null,null,null,null,null,null, 35,null,null,null,null,null,null,null]
+    },
+    // Confronto com o exercito: marcha heroica em Re menor, rapida e com peito.
+    batalha: {
+      bpm: 132, cor: "metal", vol: 0.44,
+      arp: [50,57,50,57, 53,57,53,57,  50,57,50,57, 55,57,55,57,
+            48,55,48,55, 53,55,53,55,  50,57,50,57, 57,62,57,62],
+      mel: [74,null,77,null, 81,null,null,null,  79,null,77,null, 74,null,null,null,
+            72,null,76,null, 79,null,null,null,  81,null,79,null, 81,null,86,null],
+      baixo: [38,null,38,null, 38,null,38,null,  38,null,38,null, 38,null,38,null,
+              36,null,36,null, 36,null,36,null,  38,null,38,null, 38,null,38,null]
+    },
+    // Tela de carregamento: sininhos fofos em Do maior, bem devagar.
+    espera: {
+      bpm: 66, cor: "brinca", vol: 0.30,
+      arp: [72,null,76,null, 79,null,76,null,  69,null,72,null, 76,null,72,null,
+            67,null,71,null, 74,null,71,null,  72,null,76,null, 79,null,84,null],
+      mel: [null,null,null,null, 84,null,null,null,  null,null,null,null, 81,null,null,null,
+            null,null,null,null, 83,null,null,null,  null,null,null,null, 84,null,null,null],
+      baixo: [48,null,null,null,null,null,null,null, 45,null,null,null,null,null,null,null,
+              43,null,null,null,null,null,null,null, 48,null,null,null,null,null,null,null]
+    },
+    // Reencontro e abraco: Si bemol maior, quente e romantico.
+    amor: {
+      bpm: 72, cor: "quente", vol: 0.38,
+      arp: [58,62,65,70, 65,62,65,62,  55,58,62,67, 62,58,62,58,
+            51,55,58,63, 58,55,58,55,  53,57,60,65, 60,57,60,65],
+      mel: [74,null,null,null, 77,null,75,null,  74,null,null,null, 70,null,null,null,
+            72,null,null,null, 75,null,77,null,  77,null,null,null, 74,null,null,null],
+      baixo: [46,null,null,null,null,null,null,null, 43,null,null,null,null,null,null,null,
+              39,null,null,null,null,null,null,null, 41,null,null,null,null,null,null,null]
+    },
+    // Gramado na neve: Do maior em sinos de vidro, frio e aconchegante.
+    neve: {
+      bpm: 68, cor: "cristal", vol: 0.34,
+      arp: [84,null,79,null, 88,null,84,null,  81,null,76,null, 84,null,81,null,
+            77,null,72,null, 81,null,77,null,  79,null,74,null, 83,null,79,null],
+      mel: [91,null,null,null, null,null,null,null,  88,null,null,null, null,null,null,null,
+            86,null,null,null, null,null,null,null,  88,null,null,null, 91,null,null,null],
+      baixo: [48,null,null,null,null,null,null,null, 45,null,null,null,null,null,null,null,
+              41,null,null,null,null,null,null,null, 43,null,null,null,null,null,null,null]
+    },
+    // Rei Amargo: Re menor, grave e tenso
+    vilao: {
+      bpm: 72, cor: "vilao", vol: 0.46,
+      arp: [50,53,57,53, 50,53,56,53,  50,53,57,53, 50,56,57,56,
+            48,51,55,51, 48,51,56,51,  50,53,57,53, 50,57,56,53],
+      mel: [null,null,null,null, 69,null,null,null,  null,null,null,null, 68,null,null,null,
+            null,null,null,null, 67,null,null,null,  null,null,null,null, 65,null,64,null],
+      baixo: [26,null,null,null, 26,null,null,null,  26,null,null,null, 26,null,null,null,
+              24,null,null,null, 24,null,null,null,  26,null,null,null, 26,null,null,null]
+    }
+  };
+
+  function criar() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    ctx = new AC();
+    mestre = ctx.createGain(); mestre.gain.value = mudo ? 0 : 0.9;
+    // limitador suave: impede qualquer estouro quando efeito e trilha se somam
+    const limite = ctx.createDynamicsCompressor();
+    limite.threshold.value = -8; limite.knee.value = 14;
+    limite.ratio.value = 7; limite.attack.value = 0.004; limite.release.value = 0.22;
+    mestre.connect(limite); limite.connect(ctx.destination);
+
+    // eco curto no lugar de reverb: barato e suficiente
+    eco = ctx.createGain(); eco.gain.value = 0.26;
+    const atraso = ctx.createDelay(0.5); atraso.delayTime.value = 0.17;
+    const realim = ctx.createGain(); realim.gain.value = 0.3;
+    const filtro = ctx.createBiquadFilter(); filtro.type = "lowpass"; filtro.frequency.value = 2600;
+    eco.connect(atraso); atraso.connect(filtro); filtro.connect(realim);
+    realim.connect(atraso); filtro.connect(mestre);
+
+    gMus = ctx.createGain(); gMus.gain.value = 0; gMus.connect(mestre);
+    gSfx = ctx.createGain(); gSfx.gain.value = 0.9; gSfx.connect(mestre);
+
+    return true;
+  }
+
+  /* ---- uma nota ---- */
+  function nota(freq, t, dur, cor, vol, destino) {
+    const g = ctx.createGain();
+    const fim = t + dur;
+    let o1, o2 = null, f = null;
+
+    if (cor === "sombra") {                    // grave e abafado, com o filtro respirando
+      o1 = ctx.createOscillator(); o1.type = "triangle";
+      o2 = ctx.createOscillator(); o2.type = "sine"; o2.detune.value = -9;
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.Q.value = 2.2;
+      f.frequency.setValueAtTime(380, t);
+      f.frequency.linearRampToValueAtTime(1150, t + dur * 0.45);
+      f.frequency.linearRampToValueAtTime(420, fim);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.07);
+      g.gain.exponentialRampToValueAtTime(0.0001, fim);
+    } else if (cor === "metal") {              // marcha heroica: encorpado e com garra
+      o1 = ctx.createOscillator(); o1.type = "sawtooth";
+      o2 = ctx.createOscillator(); o2.type = "square"; o2.detune.value = 6;
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 1900; f.Q.value = 1.4;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + Math.min(dur, 0.42));
+    } else if (cor === "quente") {             // acolhedor e arredondado
+      o1 = ctx.createOscillator(); o1.type = "sine";
+      o2 = ctx.createOscillator(); o2.type = "triangle"; o2.detune.value = 6;
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 2300;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.0001, fim);
+    } else if (cor === "cristal") {            // sino de vidro, bem brilhante
+      o1 = ctx.createOscillator(); o1.type = "sine";
+      o2 = ctx.createOscillator(); o2.type = "sine"; o2.detune.value = 1200;  // oitava acima
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 5200;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, fim);
+    } else if (cor === "festa") {              // sino leve: claro, curto, sem peso
+      o1 = ctx.createOscillator(); o1.type = "sine";
+      o2 = ctx.createOscillator(); o2.type = "triangle"; o2.detune.value = 4;
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 3000;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + Math.min(dur, 0.5));
+    } else if (cor === "brinca") {             // marimba fofa, saltitante
+      o1 = ctx.createOscillator(); o1.type = "triangle";
+      o2 = ctx.createOscillator(); o2.type = "sine"; o2.detune.value = 7;
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 2800;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + Math.min(dur, 0.8));
+    } else if (cor === "suave") {              // caixinha abafada, ataque macio
+      o1 = ctx.createOscillator(); o1.type = "triangle";
+      o2 = ctx.createOscillator(); o2.type = "sine"; o2.detune.value = 5;
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 2000;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.045);
+      g.gain.exponentialRampToValueAtTime(0.0001, fim);
+    } else if (cor === "caixinha") {
+      o1 = ctx.createOscillator(); o1.type = "triangle";
+      o2 = ctx.createOscillator(); o2.type = "sine"; o2.detune.value = 8;
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 3400;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, fim);
+    } else if (cor === "pizz") {
+      o1 = ctx.createOscillator(); o1.type = "triangle";
+      f = ctx.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq * 2.2; f.Q.value = 1.6;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + Math.min(dur, 0.34));
+    } else if (cor === "vilao") {
+      o1 = ctx.createOscillator(); o1.type = "sawtooth";
+      o2 = ctx.createOscillator(); o2.type = "sine"; o2.detune.value = -6;
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 760; f.Q.value = 3;
+      f.frequency.setValueAtTime(420, t);
+      f.frequency.linearRampToValueAtTime(900, t + dur * 0.5);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, fim);
+    } else { // pad grave
+      o1 = ctx.createOscillator(); o1.type = "sine";
+      f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 500;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.25);
+      g.gain.exponentialRampToValueAtTime(0.0001, fim);
+    }
+
+    o1.frequency.value = freq;
+    o1.connect(f);
+    if (o2) { o2.frequency.value = freq; o2.connect(f); }
+    f.connect(g); g.connect(destino);
+    if (cor !== "pad") g.connect(eco);
+    o1.start(t); o1.stop(fim + 0.05);
+    if (o2) { o2.start(t); o2.stop(fim + 0.05); }
+  }
+
+  /* ---- sequenciador com antecipacao ---- */
+  function agendar() {
+    const t = TEMAS[temaAtual];
+    if (!t) return;
+    const seg = 60 / t.bpm / 2;                 // duracao de uma colcheia
+    // se a aba ficou em segundo plano o relogio atrasa: reencaixa em vez de
+    // despejar todas as notas atrasadas de uma vez
+    if (proxTempo < ctx.currentTime) proxTempo = ctx.currentTime + 0.05;
+    while (proxTempo < ctx.currentTime + 0.14) {
+      const i = passoAtual % t.arp.length;
+      if (t.arp[i] != null)   nota(hz(t.arp[i]),   proxTempo, seg * 3.2, t.cor, 0.10 * t.vol, vozTema);
+      if (t.mel[i] != null)   nota(hz(t.mel[i]),   proxTempo, seg * 5.5, t.corMel || t.cor, 0.15 * t.vol, vozTema);
+      if (t.baixo[i] != null) nota(hz(t.baixo[i]), proxTempo, seg * 7.5, "pad", 0.22 * t.vol, vozTema);
+      proxTempo += seg;
+      passoAtual++;
+    }
+  }
+
+  function trocarPara(nome) {
+    if (!ctx || temaAtual === nome) return;
+    const agora = ctx.currentTime;
+    if (temaAtual) {                             // esmaece a trilha atual
+      const velha = vozTema;
+      const queda = nome ? 1.1 : 0.45;           // indo para o silencio, sai mais rapido
+      velha.gain.cancelScheduledValues(agora);
+      velha.gain.setValueAtTime(velha.gain.value, agora);
+      velha.gain.linearRampToValueAtTime(0.0001, agora + queda);
+      setTimeout(() => { try { velha.disconnect(); } catch (e) {} }, queda * 1000 + 500);
+    }
+    temaAtual = nome;
+    if (!nome) { clearInterval(relogio); relogio = null; return; }
+    vozTema = ctx.createGain();
+    vozTema.gain.setValueAtTime(0.0001, agora);
+    vozTema.gain.linearRampToValueAtTime(1, agora + 1.3);
+    vozTema.connect(gMus);
+    passoAtual = 0; proxTempo = agora + 0.08;
+    if (!relogio) relogio = setInterval(agendar, 25);
+    agendar();
+  }
+
+  /* ---- efeitos curtos ---- */
+  const EFEITOS = {
+    clique() {                                   // toque macio, quase um sopro de bolha
+      const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain(),
+            f = ctx.createBiquadFilter();
+      o.type = "sine";
+      f.type = "lowpass"; f.frequency.value = 1100;   // tira qualquer aspereza
+      o.frequency.setValueAtTime(430, t);
+      o.frequency.exponentialRampToValueAtTime(640, t + 0.10);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.055, t + 0.025);   // ataque lento = sem estalo
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
+      o.connect(f); f.connect(g); g.connect(gSfx);
+      const ge = ctx.createGain(); ge.gain.value = 0.25; g.connect(ge); ge.connect(eco);
+      o.start(t); o.stop(t + 0.3);
+    },
+    acerto() {                                   // brilho de vitoria
+      const t = ctx.currentTime;
+      [84, 88, 91, 96, 100].forEach((m, i) =>
+        nota(hz(m), t + i * 0.065, 0.9, "caixinha", 0.12, gSfx));
+    },
+    erro() {                                     // boing curto e discreto
+      const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain(),
+            f = ctx.createBiquadFilter(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+      o.type = "triangle"; f.type = "lowpass"; f.frequency.value = 1400;
+      o.frequency.setValueAtTime(330, t);
+      o.frequency.exponentialRampToValueAtTime(165, t + 0.26);
+      lfo.frequency.value = 17; lg.gain.value = 22;
+      lfo.connect(lg); lg.connect(o.frequency);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.13, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      o.connect(f); f.connect(g); g.connect(gSfx);
+      lfo.start(t); lfo.stop(t + 0.32);
+      o.start(t); o.stop(t + 0.32);
+    },
+    portal() {                                   // travessia do espelho magico
+      // O estalo vinha daqui: o ruido era um buffer de 0,4 s tocado em loop, e a
+      // cada volta a onda saltava do silencio para a amplitude cheia. Agora o
+      // portal e so tonal, sem nenhuma camada de ruido.
+      const t = ctx.currentTime;
+      // escadinha de cristais subindo, bem leve
+      [72, 76, 79, 84, 88, 91, 96].forEach((m, i) =>
+        nota(hz(m), t + 0.10 + i * 0.09, 1.6, "cristal", 0.042, gSfx));
+      // nota grave sustentada por baixo, so para dar profundidade
+      nota(hz(48), t, 1.8, "quente", 0.05, gSfx);
+    },
+    sino() {                                     // carrilhao de vento, bem discreto
+      const t = ctx.currentTime;
+      [[79, 0.055, 0.00], [84, 0.045, 0.15],
+       [86, 0.034, 0.32], [91, 0.024, 0.50]].forEach(([m, v, atraso]) =>
+        nota(hz(m), t + atraso, 2.8, "suave", v, gSfx));
+    }
+  };
+
+  /* ---- interface publica ---- */
+  return {
+    get mudo() { return mudo; },
+    iniciar() {
+      if (!ctx && !criar()) return;
+      if (ctx.state === "suspended") ctx.resume();
+      ligado = true;
+    },
+    sfx(nome) {
+      if (!ligado || mudo || !ctx || !EFEITOS[nome]) return;
+      if (ctx.state === "suspended") ctx.resume();
+      try { EFEITOS[nome](); } catch (e) {}
+    },
+    musica(nome) {
+      if (!ligado || !ctx) { temaAtual = null; return; }
+      trocarPara(nome);
+    },
+    alternarMudo() {
+      mudo = !mudo;
+      if (mestre) {
+        const t = ctx.currentTime;
+        mestre.gain.cancelScheduledValues(t);
+        mestre.gain.setValueAtTime(mestre.gain.value, t);
+        mestre.gain.linearRampToValueAtTime(mudo ? 0.0001 : 0.9, t + 0.3);
+      }
+      try { localStorage.setItem(CHAVE_MUDO, mudo ? "1" : "0"); } catch (e) {}
+      return mudo;
+    },
+    restaurarMudo() {
+      try { mudo = localStorage.getItem(CHAVE_MUDO) === "1"; } catch (e) {}
+      return mudo;
+    }
+  };
+})();
+
+const CENAS = {"001":{"hot":[{"x":29.0,"y":50.0,"w":42.0,"h":9.0,"to":2,"id":"sim-aventurar"}]},"002":{"hot":[{"x":84.81,"y":85.96,"w":12.98,"h":7.89,"to":3,"id":"proximo"}]},"003":{"hot":[{"x":41.62,"y":86.31,"w":17.06,"h":9.53,"to":4,"id":"proximo"}]},"004":{"hot":[{"x":75.59,"y":80.36,"w":22.44,"h":11.76,"to":5,"id":"proximo"}]},"005":{"hot":[{"x":34.0,"y":83.0,"w":32.0,"h":10.0,"to":6,"id":"comencar"}]},"006":{"hot":[{"x":83.82,"y":84.76,"w":16.1,"h":9.19,"to":7,"id":"proximo"}]},"007":{"hot":[{"x":55.92,"y":87.8,"w":14.37,"h":8.46,"to":8,"id":"proximo"}]},"008":{"hot":[{"x":39.77,"y":32.54,"w":16.16,"h":9.21,"to":9,"id":"proximo"}]},"009":{"hot":[{"x":28.82,"y":30.62,"w":17.95,"h":9.95,"to":10,"id":"proximo"}]},"010":{"hot":[{"x":56.15,"y":27.57,"w":16.16,"h":9.21,"to":11,"id":"proximo"}]},"011":{"hot":[{"x":27.87,"y":28.92,"w":17.95,"h":9.95,"to":12,"id":"proximo"}]},"012":{"hot":[{"x":58.61,"y":87.9,"w":12.57,"h":7.72,"to":13,"id":"proximo"}]},"013":{"hot":[{"x":82.58,"y":84.67,"w":16.88,"h":9.46,"to":14,"id":"proximo"}]},"014":{"hot":[{"x":67.94,"y":82.59,"w":23.34,"h":12.18,"to":15,"id":"proximo"}]},"015":{"hot":[{"x":57.95,"y":83.12,"w":21.54,"h":11.44,"to":16,"id":"proximo"}]},"016":{"hot":[{"x":58.55,"y":82.7,"w":20.65,"h":11.01,"to":17,"id":"proximo"}]},"017":{"hot":[{"x":55.26,"y":85.89,"w":20.65,"h":11.01,"to":18,"id":"proximo"}]},"018":{"hot":[{"x":50.11,"y":82.7,"w":21.54,"h":11.44,"to":19,"id":"proximo"}]},"019":{"hot":[{"x":50.29,"y":84.93,"w":20.65,"h":11.01,"to":20,"id":"proximo"}]},"020":{"hot":[{"x":51.91,"y":82.38,"w":17.06,"h":9.53,"to":21,"id":"proximo"}]},"021":{"hot":[{"x":60.88,"y":84.72,"w":20.65,"h":11.01,"to":22,"id":"proximo"}]},"022":{"hot":[{"x":60.88,"y":86.42,"w":17.95,"h":9.95,"to":23,"id":"proximo"}]},"023":{"hot":[{"x":60.28,"y":83.44,"w":20.65,"h":11.01,"to":24,"id":"proximo"}]},"024":{"hot":[{"x":61.48,"y":79.4,"w":20.65,"h":11.01,"to":25,"id":"proximo"}]},"025":{"hot":[{"x":61.96,"y":80.47,"w":20.65,"h":11.01,"to":26,"id":"proximo"}]},"026":{"hot":[{"x":63.15,"y":80.57,"w":17.95,"h":9.95,"to":27,"id":"proximo"}]},"027":{"hot":[{"x":66.62,"y":82.17,"w":23.34,"h":12.18,"to":28,"id":"proximo"}]},"028":{"hot":[{"x":62.55,"y":82.8,"w":24.23,"h":12.5,"to":29,"id":"proximo"}]},"029":{"hot":[{"x":70.15,"y":82.8,"w":23.34,"h":12.18,"to":30,"id":"proximo"}]},"030":{"hot":[{"x":69.43,"y":79.93,"w":23.34,"h":12.18,"to":31,"id":"proximo"}]},"031":{"hot":[{"x":55.5,"y":80.57,"w":20.65,"h":11.01,"to":32,"id":"proximo"}]},"032":{"hot":[{"x":72.06,"y":80.15,"w":21.54,"h":11.44,"to":33,"id":"proximo"}]},"033":{"hot":[{"x":10.0,"y":73.0,"w":26.0,"h":14.0,"to":34,"id":"arbusto1","certo":false},{"x":37.0,"y":73.0,"w":25.0,"h":14.0,"to":35,"id":"arbusto2","certo":false},{"x":63.0,"y":73.0,"w":28.0,"h":14.0,"to":36,"id":"arbusto3","certo":true}]},"034":{"hot":[{"x":37.0,"y":73.0,"w":25.0,"h":14.0,"to":35,"id":"arbusto2","certo":false},{"x":63.0,"y":73.0,"w":28.0,"h":14.0,"to":36,"id":"arbusto3","certo":true}]},"035":{"hot":[{"x":10.0,"y":73.0,"w":26.0,"h":14.0,"to":34,"id":"arbusto1","certo":false},{"x":63.0,"y":73.0,"w":28.0,"h":14.0,"to":36,"id":"arbusto3","certo":true}]},"036":{"hot":[{"x":81.81,"y":87.59,"w":17.06,"h":9.53,"to":37,"id":"proximo"}]},"037":{"hot":[{"x":76.61,"y":86.74,"w":20.65,"h":11.01,"to":38,"id":"proximo"}]},"038":{"hot":[{"x":76.79,"y":86.1,"w":20.65,"h":11.01,"to":39,"id":"proximo"}]},"039":{"hot":[{"x":79.14,"y":85.13,"w":20.79,"h":11.13,"to":40,"id":"proximo"}]},"040":{"hot":[{"x":79.5,"y":85.41,"w":20.01,"h":10.76,"to":41,"id":"proximo"}]},"041":{"hot":[{"x":79.03,"y":84.57,"w":20.01,"h":10.76,"to":42,"id":"proximo"}]},"042":{"hot":[{"x":79.29,"y":85.31,"w":20.01,"h":10.76,"to":43,"id":"proximo"}]},"043":{"hot":[{"x":80.14,"y":85.78,"w":17.95,"h":9.95,"to":44,"id":"proximo"}]},"044":{"hot":[{"x":77.69,"y":84.61,"w":19.75,"h":10.7,"to":45,"id":"proximo"}]},"045":{"hot":[{"x":78.46,"y":82.59,"w":19.75,"h":10.7,"to":46,"id":"proximo"}]},"046":{"hot":[{"x":77.33,"y":85.46,"w":19.75,"h":10.7,"to":47,"id":"proximo"}]},"047":{"hot":[{"x":76.01,"y":84.61,"w":23.34,"h":12.18,"to":48,"id":"proximo"}]},"048":{"hot":[{"x":76.13,"y":83.23,"w":20.65,"h":11.01,"to":49,"id":"proximo"}]},"049":{"hot":[{"x":32.0,"y":81.0,"w":38.0,"h":12.0,"to":50,"id":"ouvir-doceta"}]},"050":{"hot":[{"x":78.34,"y":86.52,"w":20.65,"h":11.01,"to":51,"id":"proximo"}]},"051":{"hot":[{"x":80.14,"y":85.89,"w":18.85,"h":10.27,"to":52,"id":"proximo"}]},"052":{"hot":[{"x":80.08,"y":86.31,"w":18.85,"h":10.27,"to":53,"id":"proximo"}]},"053":{"hot":[{"x":79.72,"y":86.52,"w":19.75,"h":10.7,"to":54,"id":"proximo"}]},"054":{"hot":[{"x":75.89,"y":83.87,"w":22.44,"h":11.76,"to":55,"id":"proximo"}]},"055":{"hot":[{"x":77.75,"y":84.72,"w":21.54,"h":11.44,"to":56,"id":"proximo"}]},"056":{"hot":[{"x":74.99,"y":85.78,"w":19.75,"h":10.7,"to":57,"id":"proximo"}]},"057":{"hot":[{"x":79.5,"y":86.8,"w":19.22,"h":10.48,"to":58,"id":"proximo"}]},"058":{"hot":[{"x":79.45,"y":86.7,"w":19.22,"h":10.48,"to":59,"id":"proximo"}]},"059":{"hot":[{"x":76.85,"y":84.57,"w":23.13,"h":12.06,"to":60,"id":"proximo"}]},"060":{"hot":[{"x":76.79,"y":84.48,"w":23.13,"h":12.06,"to":61,"id":"proximo"}]},"061":{"hot":[{"x":40.0,"y":74.0,"w":54.0,"h":13.0,"to":62,"id":"sorpresa"}]},"062":{"hot":[{"x":78.25,"y":85.04,"w":20.79,"h":11.13,"to":63,"id":"proximo"}]},"063":{"hot":[{"x":78.3,"y":85.04,"w":20.79,"h":11.13,"to":64,"id":"proximo"}]},"064":{"hot":[{"x":78.2,"y":84.94,"w":20.79,"h":11.13,"to":65,"id":"proximo"}]},"065":{"hot":[{"x":78.25,"y":84.85,"w":20.79,"h":11.13,"to":66,"id":"proximo"}]},"066":{"hot":[{"x":78.25,"y":84.85,"w":20.79,"h":11.13,"to":67,"id":"proximo"}]},"067":{"hot":[{"x":78.2,"y":84.76,"w":20.79,"h":11.13,"to":68,"id":"proximo"}]},"068":{"hot":[{"x":27.0,"y":78.0,"w":47.0,"h":10.0,"to":69,"id":"volver-castillo"}]},"069":{"hot":[{"x":80.8,"y":89.3,"w":17.92,"h":8.17,"to":70,"id":"proximo"}]},"070":{"hot":[{"x":80.75,"y":89.2,"w":17.92,"h":8.17,"to":71,"id":"proximo"}]},"071":{"hot":[{"x":80.75,"y":89.2,"w":17.92,"h":8.17,"to":72,"id":"proximo"}]},"072":{"hot":[{"x":80.75,"y":89.2,"w":17.92,"h":8.17,"to":73,"id":"proximo"}]},"073":{"hot":[{"x":80.75,"y":89.2,"w":17.92,"h":8.17,"to":74,"id":"proximo"}]},"074":{"hot":[{"x":80.75,"y":89.2,"w":17.92,"h":8.17,"to":75,"id":"proximo"}]},"075":{"hot":[{"x":28.0,"y":88.0,"w":42.0,"h":9.0,"to":76,"id":"proxima-aventura"}]},"076":{"hot":[{"x":37.0,"y":79.0,"w":26.0,"h":8.0,"to":75,"id":"volver-carta"}]}};
+const PRIMEIRA = 1, ULTIMA = 76;
+const CHAVE = "docelandia.progresso";
+
+const img = document.getElementById("cena");
+const imgSai = document.getElementById("cenaSai");
+const palco = document.getElementById("palco");
+const hud = document.getElementById("hud");
+const contador = document.getElementById("contador");
+const ajuda = document.getElementById("ajuda");
+const btVoltar = document.getElementById("voltarCena");
+
+let passe = 0, pedido = 0;
+
+let atual = PRIMEIRA;
+let historico = [];
+const hotspots = [];
+
+/* cena com barra de carregamento: medidas tiradas da propria arte, em % do quadro */
+const CARGA = {
+  cena: "068",
+  trilho: { x: 35.00, y: 55.55, w: 31.05, h: 4.60 },   // interior da barra
+  botao:  { x: 26.85, y: 76.25, w: 46.95, h: 13.10 },  // pilula do botao
+  ms: 3500
+};
+/* qual trilha toca em cada trecho da historia */
+/* Qual trilha toca em cada trecho. A primeira faixa que casar vence,
+   por isso a 065 (Rei Amargo) fica de fora da batalha mesmo estando no meio dela. */
+const TRILHAS_POR_CENA = [
+  ["vilao",    [[8, 20], [57, 61]]],            // roubo do cristal e confronto
+  ["batalha",  [[62, 67]]],                     // exercito de paes ate a entrega do cristal
+  ["alegre",   [[1, 7], [21, 32]]],             // abertura, floresta de algodao-doce e paezinhos
+  ["festa",    [[37, 42]]],                     // acharam o cafe e a ponte voltou
+  ["sombrio",  [[43, 55]]],                     // parque abandonado, espelhos e travessia
+  ["misterio", [[33, 36], [56, 56]]],           // arbustos / chegada ao castelo do vilao
+  ["espera",   [[68, 68]]],                     // barra de carregamento
+  ["amor",     [[69, 75]]],                     // reencontro no castelo e a carta
+  ["neve",     [[76, 76]]]                      // Gramado
+];
+/* cenas sem musica nenhuma: so o efeito proprio da cena */
+const CENAS_SEM_TRILHA = [];
+
+function temaDaCena(n) {
+  if (CENAS_SEM_TRILHA.some(([a, b]) => n >= a && n <= b)) return null;
+  for (const [nome, fx] of TRILHAS_POR_CENA)
+    if (fx.some(([a, b]) => n >= a && n <= b)) return nome;
+  return "doce";
+}
+
+/* efeitos disparados ao ENTRAR numa cena */
+const SFX_DA_CENA = { "055": "portal" };
+
+let cargaFeita = false;      // depois de encher uma vez, nao faz esperar de novo
+let cargaTimer = null;
+
+const chave = n => String(n).padStart(3, "0");
+
+function limpar() {
+  clearTimeout(cargaTimer); cargaTimer = null;
+  hotspots.forEach(el => el.remove());
+  hotspots.length = 0;
+}
+
+function porCento(el, r) {
+  el.style.left = r.x + "%"; el.style.top = r.y + "%";
+  el.style.width = r.w + "%"; el.style.height = r.h + "%";
+}
+
+/* Enche a barra desenhada na arte e so entao libera o botao. */
+function montarCarga(botaoEl) {
+  const barra = document.createElement("div");
+  barra.id = "barraCarga";
+  porCento(barra, CARGA.trilho);
+
+  const fill = document.createElement("div");
+  fill.id = "enchendo";
+  const ponta = document.createElement("div");
+  ponta.id = "pontaLuz";
+  barra.appendChild(fill);
+  barra.appendChild(ponta);
+
+  const veu = document.createElement("div");
+  veu.id = "veuBotao";
+  porCento(veu, CARGA.botao);
+
+  palco.appendChild(barra); hotspots.push(barra);
+  palco.appendChild(veu);   hotspots.push(veu);
+
+  function liberar() {
+    fill.classList.add("cheio");
+    ponta.style.opacity = "0";
+    veu.style.opacity = "0";
+    botaoEl.classList.remove("travado");
+    botaoEl.classList.add("liberado");
+    if (!cargaFeita) Som.sfx("sino");
+    cargaFeita = true;
+  }
+
+  if (cargaFeita) {                        // ja encheu antes: entra liberado, sem espera
+    veu.style.transition = "none";
+    liberar();
+    return;
+  }
+
+  botaoEl.classList.add("travado");
+  const lento = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const dur = lento ? 700 : CARGA.ms;
+  fill.style.setProperty("--dur", dur + "ms");
+
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    fill.classList.add("correndo");
+    ponta.style.opacity = "1";
+    ponta.style.transition = "left " + dur + "ms cubic-bezier(.35,.02,.25,1), opacity .3s";
+    ponta.style.left = "0%";
+    requestAnimationFrame(() => { ponta.style.left = "99%"; });
+  }));
+
+  cargaTimer = setTimeout(liberar, dur + 60);
+}
+
+function precarregar(n) {
+  if (!CENAS[chave(n)] || !Cofre.aberto) return;
+  Cofre.url(n).catch(() => {});                      // baixa e decifra em segundo plano
+}
+
+function mostrar(n, guardar = true, dir = 1) {
+  const c = CENAS[chave(n)];
+  if (!c) return;
+  if (guardar && n !== atual) historico.push(atual);
+  atual = n;
+
+  const anterior = img.getAttribute("src");
+  const lado = dir >= 0 ? "frente" : "tras";
+  const meuPedido = ++pedido;
+  // baixa o bloco cifrado, decifra e so entao troca a imagem
+  const promessa = Cofre.url(n)
+    .then(fonte => new Promise(ok => {
+      const pre = new Image();
+      pre.onload = pre.onerror = () => ok(fonte);
+      pre.src = fonte;
+    }))
+    .then(fonte => {
+      if (meuPedido !== pedido) return;              // o jogador ja mudou de cena
+      if (anterior && anterior !== fonte) {
+        imgSai.src = anterior;
+        imgSai.className = "";
+        void imgSai.offsetWidth;                     // reinicia a animacao
+        imgSai.classList.add("anima", lado);
+        imgSai.dataset.passe = String(++passe);
+
+        img.src = fonte;
+        img.className = "";
+        void img.offsetWidth;
+        img.classList.add("entra", lado);
+      } else {
+        img.src = fonte;
+      }
+    })
+    .catch(e => console.error("cena " + n + ":", e));
+
+  limpar();
+  c.hot.forEach(h => {
+    const el = document.createElement("button");
+    el.className = "hot";
+    el.style.left = h.x + "%";
+    el.style.top = h.y + "%";
+    el.style.width = h.w + "%";
+    el.style.height = h.h + "%";
+    el.setAttribute("aria-label", h.id);
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      Som.sfx(h.certo === true ? "acerto" : h.certo === false ? "erro" : "clique");
+      mostrar(h.to, true, h.to >= atual ? 1 : -1);
+    });
+    palco.appendChild(el);
+    hotspots.push(el);
+  });
+
+  if (chave(n) === CARGA.cena && hotspots.length) montarCarga(hotspots[0]);
+
+  marcarCenaAtual(n);
+  btVoltar.hidden = (n <= PRIMEIRA);          // nao ha cena antes da 001
+  Som.musica(temaDaCena(n));
+  if (SFX_DA_CENA[chave(n)]) Som.sfx(SFX_DA_CENA[chave(n)]);
+  contador.textContent = chave(n) + " / " + chave(ULTIMA);
+  try { localStorage.setItem(CHAVE, String(n)); } catch (e) {}
+  [n + 1, n + 2, n - 1].forEach(precarregar);
+  (c.hot || []).forEach(h => precarregar(h.to));
+  return promessa;
+}
+
+function avancar() {
+  if (menuAberto()) return;
+  const c = CENAS[chave(atual)];
+  if (!c || c.hot.length !== 1) return;
+  if (hotspots[0] && hotspots[0].classList.contains("travado")) return;  // barra ainda enchendo
+  mostrar(c.hot[0].to);
+}
+// VOLTAR = cena anterior da sequencia numerica (008 -> 007)
+function voltar() {
+  if (menuAberto()) return;
+  if (atual > PRIMEIRA) mostrar(atual - 1, false, -1);
+}
+
+btVoltar.addEventListener("click", e => {
+  e.stopPropagation(); Som.sfx("clique"); voltar();
+});
+document.getElementById("reiniciar").onclick = () => {
+  historico = []; mostrar(PRIMEIRA, false, -1);
+};
+imgSai.addEventListener("animationend", () => {
+  // so limpa se nenhuma passagem nova comecou enquanto esta terminava
+  if (Number(imgSai.dataset.passe) !== passe) return;
+  imgSai.className = "";
+  imgSai.removeAttribute("src");
+});
+img.addEventListener("animationend", () => { img.className = ""; });
+
+document.getElementById("btAjuda").onclick = () => ajuda.classList.toggle("ver");
+ajuda.onclick = () => ajuda.classList.remove("ver");
+
+addEventListener("keydown", e => {
+  if (e.key === "ArrowRight" || e.key === " " || e.key === "Enter") { Som.sfx("clique"); avancar(); e.preventDefault(); }
+  else if (e.key === "ArrowLeft") { Som.sfx("clique"); voltar(); }
+  else if (e.key.toLowerCase() === "m") btSom.click();
+  else if (e.key.toLowerCase() === "l") abrirMenu(!menuAberto());
+  else if (e.key.toLowerCase() === "h") document.body.classList.toggle("dica");
+  else if (e.key === "Escape") { ajuda.classList.remove("ver"); abrirMenu(false); }
+});
+
+let sumir;
+addEventListener("mousemove", () => {
+  hud.classList.add("ver");
+  clearTimeout(sumir);
+  sumir = setTimeout(() => hud.classList.remove("ver"), 2200);
+});
+
+/* ---- brilhos ao clicar em qualquer botao ---- */
+(function () {
+  const caixa = document.getElementById("brilhos");
+  const CORES = ["#ffd9f0", "#ff8fd0", "#ffd98a", "#fff6c9", "#ffffff", "#c9b6ff"];
+  const MAX = 90;                      // teto de particulas simultaneas
+  let vivas = 0;
+
+  function faiscar(px, py) {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const quantas = Math.min(14, MAX - vivas);
+    if (quantas <= 0) return;
+    const lote = document.createDocumentFragment();
+    for (let i = 0; i < quantas; i++) {
+      const f = document.createElement("span");
+      f.className = "faisca" + (Math.random() < .35 ? " bola" : "");
+      const ang = (Math.PI * 2 * i) / quantas + Math.random() * .6;
+      const raio = 10 + Math.random() * 46;
+      f.style.setProperty("--x", px + "px");
+      f.style.setProperty("--y", py + "px");
+      f.style.setProperty("--dx", (Math.cos(ang) * raio).toFixed(1) + "px");
+      f.style.setProperty("--dy", (-40 - Math.random() * 75 + Math.sin(ang) * raio * .35).toFixed(1) + "px");
+      f.style.setProperty("--t", (5 + Math.random() * 11).toFixed(1) + "px");
+      f.style.setProperty("--giro", (Math.random() * 300 - 150).toFixed(0) + "deg");
+      f.style.setProperty("--dur", (620 + Math.random() * 420).toFixed(0) + "ms");
+      f.style.setProperty("--cor", CORES[(Math.random() * CORES.length) | 0]);
+      f.addEventListener("animationend", () => { f.remove(); vivas--; }, { once: true });
+      lote.appendChild(f);
+      vivas++;
+    }
+    caixa.appendChild(lote);
+  }
+
+  // captura: dispara mesmo nos botoes que interrompem a propagacao
+  document.addEventListener("pointerdown", e => {
+    if (e.target.closest(".hot, #voltarCena, #hud button, .irCena")) faiscar(e.clientX, e.clientY);
+  }, true);
+
+  // teclado tambem ganha brilho, no centro do botao correspondente
+  addEventListener("keydown", e => {
+    let alvo = null;
+    if (e.key === "ArrowRight" || e.key === " " || e.key === "Enter") alvo = document.querySelector(".hot");
+    else if (e.key === "ArrowLeft") alvo = document.getElementById("voltarCena");
+    if (alvo && !alvo.hidden) {
+      const r = alvo.getBoundingClientRect();
+      faiscar(r.left + r.width / 2, r.top + r.height / 2);
+    }
+  });
+})();
+
+/* ---- menu lateral de cenas ---- */
+const CAPITULOS = [
+  ["Abertura",                    1,   7],
+  ["O roubo do cristal",          8,  20],
+  ["Floresta de Algodao-Doce",   21,  32],
+  ["O enigma dos arbustos",      33,  36],
+  ["A ponte refeita",            37,  42],
+  ["Parque dos Doces Perdidos",  43,  55],
+  ["Castelo do Rei Amargo",      56,  67],
+  ["De volta a DoceLandia",      68,  75],
+  ["Proxima aventura",           76,  76]
+];
+
+const abaMenu   = document.getElementById("abaMenu");
+const painel    = document.getElementById("painelLateral");
+const menuCenas = document.getElementById("menuCenas");
+const veuMenu   = document.getElementById("veuMenu");
+const listaCenas = document.getElementById("listaCenas");
+const botoesCena = {};
+
+(function montarMenu() {
+  const frag = document.createDocumentFragment();
+  for (const [titulo, de, ate] of CAPITULOS) {
+    const h = document.createElement("h4");
+    h.textContent = titulo;
+    frag.appendChild(h);
+    const grupo = document.createElement("div");
+    grupo.className = "grupoCenas";
+    for (let n = de; n <= ate && n <= ULTIMA; n++) {
+      const b = document.createElement("button");
+      b.className = "irCena";
+      b.textContent = chave(n);
+      b.title = "Ir para a cena " + chave(n);
+      b.addEventListener("click", e => {
+        e.stopPropagation();
+        if (n !== atual) {
+          Som.sfx("clique");
+          mostrar(n, true, n >= atual ? 1 : -1);   // a BGM da cena entra sozinha
+        }
+        abrirMenu(false);
+      });
+      grupo.appendChild(b);
+      botoesCena[n] = b;
+    }
+    frag.appendChild(grupo);
+  }
+  listaCenas.appendChild(frag);
+})();
+
+function marcarCenaAtual(n) {
+  for (const k in botoesCena) botoesCena[k].classList.toggle("atual", Number(k) === n);
+}
+
+const menuAberto = () => painel.classList.contains("aberto");
+
+function abrirMenu(abrir) {
+  painel.classList.toggle("aberto", abrir);
+  veuMenu.classList.toggle("aberto", abrir);
+  abaMenu.setAttribute("aria-expanded", abrir ? "true" : "false");
+  if (abrir && botoesCena[atual]) {
+    botoesCena[atual].scrollIntoView({ block: "center", behavior: "auto" });
+  }
+}
+
+/* a propria aba abre e recolhe: nao ha botao de fechar */
+abaMenu.addEventListener("click", e => { e.stopPropagation(); abrirMenu(!menuAberto()); });
+veuMenu.addEventListener("click", e => { e.stopPropagation(); abrirMenu(false); });
+
+/* ---- controle de som ---- */
+const btSom = document.getElementById("som");
+if (Som.restaurarMudo()) btSom.classList.add("mudo");
+btSom.addEventListener("click", e => {
+  e.stopPropagation();
+  Som.iniciar();
+  btSom.classList.toggle("mudo", Som.alternarMudo());
+  if (!Som.mudo) Som.musica(temaDaCena(atual));
+});
+
+/* navegadores so liberam audio apos um gesto do jogador */
+function despertarAudio() {
+  Som.iniciar();
+  Som.musica(temaDaCena(atual));
+}
+["pointerdown", "keydown"].forEach(ev =>
+  addEventListener(ev, despertarAudio, { once: true, capture: true }));
+
+let salvo = PRIMEIRA;
+try { salvo = parseInt(localStorage.getItem(CHAVE), 10) || PRIMEIRA; } catch (e) {}
+if (!CENAS[chave(salvo)]) salvo = PRIMEIRA;
+
+/* ---- portao: o jogo so aparece depois da senha certa ---- */
+const portao    = document.getElementById("portao");
+const formSenha = document.getElementById("formSenha");
+const campoSenha = document.getElementById("campoSenha");
+const erroSenha = document.getElementById("erroSenha");
+const btEntrar  = document.getElementById("btEntrar");
+
+formSenha.addEventListener("submit", async e => {
+  e.preventDefault();
+  const senha = campoSenha.value;
+  if (!senha) return;
+  btEntrar.disabled = true;
+  erroSenha.textContent = "Abrindo...";
+  portao.classList.remove("tremendo");
+
+  const certo = await Cofre.abrir(senha);
+  if (!certo) {
+    btEntrar.disabled = false;
+    erroSenha.textContent = "Senha incorreta. Tente de novo.";
+    void portao.offsetWidth;
+    portao.classList.add("tremendo");
+    campoSenha.select();
+    return;
+  }
+
+  campoSenha.value = "";
+  erroSenha.textContent = "";
+  Som.iniciar();
+  await mostrar(salvo, false);          // espera a primeira cena aparecer
+  portao.classList.add("saindo");
+  setTimeout(() => portao.remove(), 600);
+});
+campoSenha.focus();
+</script>
+</body>
+</html>
